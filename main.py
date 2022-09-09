@@ -1,10 +1,15 @@
-import enum
+import functools
+
 from assets import AssetFactory
+
 from account import Account
-from market import Market
-from options import OptionSettings
+
+from market import SimulatedMarket
+from options import BlackScholesPricingModel, HestonPricingModel, OptionSettings
+
 
 import logging
+import itertools
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,9 +31,10 @@ def main():
     logger = logging.Logger(__name__)
     logger.addHandler(logging.StreamHandler())
     TIMESTEP = 0.5 / 12  # Twice a month
-    MARKET_TIME = 300
-    TIME_STEPS_TO_RUN = int(MARKET_TIME / TIMESTEP)
-    RISK_FREE_RETURN = 0.00
+    MARKET_TIME = 3
+    TIME_STEPS_TO_RUN = int(MARKET_TIME / TIMESTEP) + 1
+    RISK_FREE_RETURN = 0.0
+    OPTION_EXPIRY_TIME = 1 / 12
     logger.info(
         f"""
     {MARKET_TIME=}
@@ -40,14 +46,42 @@ def main():
     asset_factory = AssetFactory(initial_price_generator)
 
     investigated_asset = asset_factory.get_geo_brownian_varying_variance(
-        0, 0.01, 0.01, 0.01, 0.5
+        0, 0.01, 0.01, 0.01, 0.5, 0.2
     )
     assets = [asset_factory.get_geo_brownian_walk_asset(0.0, 0.03), investigated_asset]
 
-    market = Market(MARKET_TIME, assets)
+    market = SimulatedMarket(MARKET_TIME, assets)
     accounts = []
-    for i, a in enumerate(assets):
-        options_settings = OptionSettings([a], RISK_FREE_RETURN, 3 / 12, 1, 0.25 / 12)
+
+    pricing_models = [
+        BlackScholesPricingModel,
+        functools.partial(
+            HestonPricingModel,
+            stock_price=None,
+            time_to_expiry=OPTION_EXPIRY_TIME,
+            theta=1,
+            reversion_rate=1,
+            initial_volatility=1,
+            lamda=1,
+            sigma=1,
+            rho=1,
+        ),
+    ]
+
+    for i, asset, pricing_model in zip(
+        itertools.count(), assets, itertools.cycle(pricing_models)
+    ):
+        options_settings = OptionSettings(
+            assets_sold_on=[asset],
+            risk_free_return=RISK_FREE_RETURN,
+            multiplicity=1,
+            sell_frequency=0.25 / 12,
+            expiry=OPTION_EXPIRY_TIME,
+            pricing_model=pricing_model(
+                strike_price_method=lambda asset: asset.price,
+                risk_free_return=RISK_FREE_RETURN,
+            ),
+        )
         accounts.append(Account(f"account {i}", 1000, market, options_settings))
 
     market.register_accounts(accounts)

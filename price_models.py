@@ -6,15 +6,15 @@ class PriceChangeModel(ABC):
     """
     Abstract implementation of the API that a PriceChangeModel should implement.
     This drives the price of an asset over time.
-    It is expected that Var[step(dt);step(dt)] ~= Var[step(2dt)]
+    It is expected that Var[step(dt);step(dt)] ~ Var[step(2dt)]
     """
 
     @abstractmethod
-    def __init__(self, initial_price, *args, **kwargs) -> None:
+    def __init__(self, initial_price: float, *args, **kwargs) -> None:
         self._price = initial_price
 
     @property
-    def price(self):
+    def price(self) -> float:
         return self._price
 
     @abstractmethod
@@ -90,6 +90,7 @@ class GeometricBrownianMotionWithVaryingVariance(PriceChangeModel):
         long_variance,
         vol_vol,
         reversion_rate,
+        rho,
     ) -> None:
         super().__init__(initial_price)
         self.drift = drift
@@ -98,24 +99,26 @@ class GeometricBrownianMotionWithVaryingVariance(PriceChangeModel):
         self.reversion_rate = reversion_rate
         self.vol_vol = vol_vol
         self.volatility_history = [initial_volatility]
+        self.rho = rho
 
     def step(self, dt):
-        dS = self.drift * self._price * dt + np.random.normal(
-            0, self._price * self.volatility * np.sqrt(dt)
+        mu = np.array([0, 0])
+        cov = np.array([[1, self.rho], [self.rho, 1]])
+
+        W = np.random.multivariate_normal(mu, cov)
+        s_draw, v_draw = W[0], W[1]
+
+        dS = (
+            self.drift * self._price * dt
+            + s_draw * self._price * self.volatility * np.sqrt(dt)
         )
 
         dv = self.reversion_rate * (
             self.long_variance - self.volatility
-        ) * dt + self.vol_vol * np.sqrt(self.volatility) * np.random.normal(
-            0, 1
-        ) * np.sqrt(
-            dt
-        )
+        ) * dt + self.vol_vol * np.sqrt(self.volatility) * v_draw * np.sqrt(dt)
 
         self._price += dS
         self.volatility += dv
-        if self.price < 5:
-            exit()
         if self.volatility < 0:
             self.volatility = 0
         self.volatility_history.append(self.volatility)

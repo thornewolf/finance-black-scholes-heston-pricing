@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from assets import Asset
 
 
-class Market:
+class SimulatedMarket:
     """
     Simulates a market containing assets and options.
     """
@@ -30,8 +30,8 @@ class Market:
             accounts = []
         self.assets = assets
         self.accounts = accounts
-        self.options: list["Option"] = []
-        self.all_options: list["Option"] = []
+        self._live_options: list["Option"] = []
+        self._all_options: list["Option"] = []
         self.in_the_money_count = 0
         self.out_of_the_money_count = 0
 
@@ -39,21 +39,21 @@ class Market:
     def time_left(self):
         return self.end_time - self.time
 
-    def add_option(self, option: "Option"):
-        self.options.append(option)
-        self.all_options.append(option)
+    def sell_option(self, option: "Option"):
+        self._live_options.append(option)
+        self._all_options.append(option)
 
     def evaluate_options(self):
-        freshly_expired = [o for o in self.options if self.time > o.expiry]
+        freshly_expired = [o for o in self._live_options if self.time > o.expiry]
         for o in freshly_expired:
             if o.asset.price > o.strike:
                 self.in_the_money_count += 1
-                o.owner.value -= (o.asset.price - o.strike) * o.multiplicity
+                o.owner.capital -= (o.asset.price - o.strike) * o.multiplicity
             else:
                 self.out_of_the_money_count += 1
             o.expired = True
             o.terminal_price = o.asset.price
-            self.options.remove(o)
+            self._live_options.remove(o)
 
     def step(self, dt):
         self.time += dt
@@ -85,11 +85,13 @@ class Market:
         plt.ylabel("Return proportion")
 
     def plot_options(self, axs):
-        premiums = np.array([o.premium for o in self.all_options])
+        premiums = np.array([o.premium for o in self._all_options])
+
+        assert all(o.terminal_price is not None for o in self._all_options)
         profits = np.array(
             [
-                min(o.premium, o.premium - (o.terminal_price - o.strike))
-                for o in self.all_options
+                min(o.premium, o.premium - (o.terminal_price - o.strike))  # type: ignore
+                for o in self._all_options
             ]
         )
         ax = axs[0, 0]  # type: ignore

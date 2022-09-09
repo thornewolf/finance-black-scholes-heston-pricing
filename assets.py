@@ -1,3 +1,5 @@
+from dataclasses import dataclass, field
+
 from price_models import (
     PriceChangeModel,
     RiskFreeGrowthModel,
@@ -9,23 +11,35 @@ from typing import Callable
 import numpy as np
 
 
+@dataclass
 class Asset:
     """
     Represents any market asset. Keeps track of its own price history and
     subscribes to some PriceChangeModel for its price movement.
     """
 
-    def __init__(self, name, price_change_model: PriceChangeModel):
-        self.name = name
-        self.price_change_model = price_change_model
-        self.time = 0
-        self.time_history: list[float] = [0]
-        self.price_history: list[float] = [price_change_model.price]
-        self.return_history = np.array([])
+    price_change_model: PriceChangeModel
+    name: str
+    time: float = field(init=False, default=0)
+    time_history: list[float] = field(init=False, default_factory=lambda: [0])
+    price_history: list[float] = field(init=False)
+    return_history: np.ndarray = field(init=False, default_factory=lambda: np.array([]))
+
+    def __post_init__(self):
+        self.price_history = [self.price_change_model.price]
 
     @property
     def price(self):
         return self.price_change_model.price
+
+    @property
+    def volatility(self):
+        """
+        Standard deviation is the measure of volatility
+        """
+        return np.std(self.return_history[:60]) / np.sqrt(
+            self.time_history[1] - self.time_history[0]
+        )
 
     def step(self, dt: float):
         self.price_change_model.step(dt)
@@ -55,8 +69,8 @@ class AssetFactory:
         if name is None:
             name = f"Risk Free r={interest_rate}"
         return Asset(
-            name,
             RiskFreeGrowthModel(self.initial_value_fn(), interest_rate),
+            name,
         )
 
     def get_brownian_walk_asset(self, drift, variance, name=None):
@@ -65,23 +79,20 @@ class AssetFactory:
         """
         if name is None:
             name = f"BM_{drift:.2f}_{variance:f.2f}"
-        return Asset(
-            "brownian_walk", BrownianWalkModel(self.initial_value_fn(), drift, variance)
-        )
+        return Asset(BrownianWalkModel(self.initial_value_fn(), drift, variance), name)
 
     def get_geo_brownian_walk_asset(self, drift, variance, name=None):
         if name is None:
             name = f"GBM_{drift:.2f}_{variance:.2f}"
         return Asset(
-            name,
             GeometricBrownianWalkModel(self.initial_value_fn(), drift, variance),
+            name,
         )
 
     def get_geo_brownian_varying_variance(
-        self, drift, variance, long_variance, vol_vol, reversion
+        self, drift, variance, long_variance, vol_vol, reversion, correlation
     ):
         return Asset(
-            "new",
             GeometricBrownianMotionWithVaryingVariance(
                 self.initial_value_fn(),
                 drift,
@@ -89,5 +100,17 @@ class AssetFactory:
                 long_variance,
                 vol_vol,
                 reversion,
+                correlation
             ),
+            f"GBM_VV_{drift:.2f}_{variance:.2f}_{long_variance:.2f}_{vol_vol:.2f}",
         )
+
+
+@dataclass
+class Position:
+    asset: Asset
+    amount: int
+
+    @property
+    def value(self):
+        return self.asset.price * self.amount
